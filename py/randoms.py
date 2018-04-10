@@ -11,6 +11,7 @@ import  matplotlib;             matplotlib.use('PDF')
 import  math
 import numpy as np 
 import pylabl as pl 
+import warnings
 
 import nbodykit.lab as    *
 from astropy.io import fits
@@ -24,26 +25,83 @@ from astropy.io    import fits
 class Randoms(object): 
 
     def __init__(self): 
-
-
-    def make(self): 
-        ''' code for making the mocks
         '''
+        '''
+        pass 
+
+    def make(self, Nr, zs=None, dndz=None, seed=None, file=None): 
+        ''' code for making the random catalogs  
+
+        '''
+        if zs is None and dndz is None: 
+            msg = "No redshifts or dn/dz provided \n code will not return redshifts"
+            raise warnings.warn(msg) 
+
+        # generate randoms in a big box that covers all of 
+        # the DESI footprint. This is a very brute froce 
+        # way of doing things. Would require little effort 
+        # to improve
+        rr = np.random.RandomState(seed) # random seed
+
+        ra, dec = rr.uniform(size=(4.*Nr,2)) 
+    
+        ra *= 360.
+        dec *= 90.
+        dec += -25
+        w = self.trim_to_footprint(ra, dec)
+
+        # trim random galaxies outside footprint and only keep N_r 
+        # galaxies
+        keep = (w > 0.) 
+        assert np.sum(keep) > Nr 
+        
+        ra = ra[keep][:Nr]
+        dec = dec[keep][:Nr]
+        w = w[keep][:Nr]
+
+        if zs is None and dndz is None: 
+            if file is None: 
+                # no redshifts needed output now 
+                return np.vstack([ra, dec, w]).T
+            else:
+                # save to file 
+                self.write2file(file, np.vstack([ra, dec, w]).T, cols=['ra', 'dec', 'weight'])
+                return None 
+    
+        # sample redshift 
+        if zs is not None: 
+            z = rr.choice(zs, size=Nr) 
+        else: 
+    
+        if file is None: 
+            return np.vstack([ra, dec, z, w]).T          
+        else: 
+            self.write2file(file, np.vstack([ra, dec, z, w]).T, 
+                    cols=['ra', 'dec', 'z', 'weight'])
+            return None 
+
+    def trim_to_footprint(self, ra, dec):
+        ''' Given RA and Dec values, return a np.ndarray of which pixels are in the 
+        DESI footprint. In principle `desimodel.footprint` should return appropriate 
+        systematic weight given ra and dec. I dont' think this is the case at the 
+        moment. 
+        '''
+        assert len(ra) == len(dec) 
+
+        pixweight = load_pixweight(256)
+        healpix   = footprint.radec2pix(256, ra, dec) # ra dec of the targets
+        weights   = pixweight[healpix] # weights=1 in footprint
+        return weights
+
+    def write2file(self, name, data, cols=None): 
+        ''' write data to specified file 
+        '''
+        assert len(cols) == data.shape[1] 
+
+        # check file type 
 
 
-def trim_to_footprint(ra, dec):
-    ''' Given RA and Dec values, return a np.ndarray of which pixels are in the 
-    DESI footprint. 
-    '''
-    assert len(ra) == len(dec) 
-
-    pixweight = load_pixweight(256)
-    healpix   = footprint.radec2pix(256, ra, dec) # ra dec of the targets
-    weights   = pixweight[healpix] # weights=1 in footprint
-    ww        = np.nonzero(weights>0.9)
-    return ww
-
-
+        return None 
 
 '''
     #cosmo              = cosmology.Cosmology(h=0.7).match(Omega0_m=0.31)
