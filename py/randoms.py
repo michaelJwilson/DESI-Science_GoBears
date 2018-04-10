@@ -1,10 +1,11 @@
 '''
 
-module for generating randoms 
+module for generating randoms catalogs used in cosmological analyses 
+(e.g. measuring the two-point correlation function) 
 
 Authors: 
-    ChangHoon Hahn 
-    Michael Wilson
+    ChangHoon Hahn -- changhoonhahn@lbl.gov
+    Martin White 
 
 '''
 import numpy as np 
@@ -32,7 +33,6 @@ class Randoms(object):
         if zs is None and dndz is None: 
             msg = "No redshifts or dn/dz provided \n code will not return redshifts"
             raise warnings.warn(msg) 
-
         if zs and dndz: 
             raise ValueError("specify either zs or dndz, not both") 
 
