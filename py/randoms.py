@@ -144,9 +144,3 @@ class Randoms(object):
                 f.create_dataset(col, data=tbl.columns[i])
             f.close() 
         return None 
-
-
-if __name__=="__main__": 
-    rand = Randoms() 
-    #rand.make(10000, seed=1, file='test.fits') 
-    rand.make(10000, seed=1, file='test.hdf5') 
