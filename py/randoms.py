@@ -1,84 +1,146 @@
-import  matplotlib;             matplotlib.use('PDF')
- 
-import  math
-import  numpy           as      np
-import  pylab           as      pl
+'''
 
-from    nbodykit.lab    import  *
-from    astropy.io      import  fits
+module for generating randoms catalogs used in cosmological analyses 
+(e.g. measuring the two-point correlation function) 
 
-
-cosmo              = cosmology.Cosmology(h=0.7).match(Omega0_m=0.31)
-
-ftiles             = fits.open('./desi-tiles.fits')
-ftiles             = ftiles[1]
-
-
-tiles              = {}
-tiles['META']      = {}
-
-## tile radius [degree].                                                                                            
-tiles['META']['DRADIUS'] = 1.605
-tiles['META']['RRADIUS'] = np.radians(tiles['META']['DRADIUS'])
-
-for tile in ftiles.data[::1]:
-  if tile[4] == 1: ## In DESI;  Tiled whole 4PI steradians incase of footprint changes.    
-    id                = tile[0]
-
-    tiles[id]         = {}
-
-    ## RA, DEC in DEG
-    tiles[id]['RA']   = tile[1] 
-    tiles[id]['DEC']  = tile[2]
-
-    ## print id, tiles[id]['RA'], tiles[id]['DEC']
-    
-    tiles[id]['THETA'] = np.pi/2. - np.radians(tiles[id]['DEC'])
-
-    tiles[id]['SINT']  = np.sin(tiles[id]['THETA'])
-    tiles[id]['COST']  = np.cos(tiles[id]['THETA'])
-
-    pl.plot(tiles[id]['RA'], tiles[id]['DEC'], 'k.')
+Authors: 
+    ChangHoon Hahn -- changhoonhahn@lbl.gov
+    Sukdeep Singh 
+    Martin White 
 
 '''
-## RAND GENERATION
-NRANDPERTILE       = 1
- 
-rands              = {}
+import numpy as np 
+import h5py 
+import warnings
 
-for id in tiles:
-    if id is not 'META':
-        print id, tiles[id]['COST']
+from astropy.io import fits
+from astropy.table import Table
+
+from desimodel.io  import load_pixweight
+from desimodel     import footprint
+
+
+class Randoms(object): 
+    ''' class object for constructing random catalogs used in 
+    cosmological analyses (e.g. measuring the two-point correlation 
+    function). 
+    '''
+    def __init__(self): 
+        pass 
+
+    def make(self, Nr, zs=None, dndz=None, seed=None, file=None): 
+        ''' construct random catalogs with `Nr` randoms with the DESI 
+        footprint. First (RA, Dec) values are uniformly sampled from a 
+        box that conservatively covers the DESI footprint. The (RA, Dec) 
+        values are then checked to ensure they are within the DESI 
+        footprint. If redshift values are desired (i.e. kwargs zs or dndz
+        is specified) redshifts are assigned to the random points. 
+
+        parameters
+        ----------
+        Nr : int
+            Number of random galaxies in the catalog
+
+        zs : (optional) ndarray
+            if specified the random (RA, Dec) values within the DESI
+            footprint are assigned redshifts randomly sampled from this 
+            array. 
+
+        dndz : (optional) ndarray
+            instead of zs, dndz can be provided and the random (RA, Dec) 
+            values within the DESI footprint are assigned redshifts randomly 
+            to reproduce the dndz.   
+
+        seed : (optional) int
+            random seed
+
+        file : (optional) str
+            if specified, the random catalog will be saved to file. At the
+            moment only .fits and .hdf5 can be specified.   
+        '''
+        if zs is None and dndz is None: 
+            msg = "No redshifts or dn/dz provided \n code will not return redshifts"
+            warnings.warn(msg) 
+        if zs and dndz: 
+            raise ValueError("specify either zs or dndz, not both") 
+
+        # generate randoms in a big box that covers all of 
+        # the DESI footprint. This is a very brute froce 
+        # way of doing things. Would require little effort 
+        # to improve
+        rr = np.random.RandomState(seed) # random seed
+
+        ra, dec = rr.uniform(size=(2, 4*Nr)) 
     
-        radraws              =  np.random.uniform(low =  0.0, high = 1.0, size = NRANDPERTILE)
-        cosdraws             =  np.random.uniform(low = -0.5, high = 0.5, size = NRANDPERTILE)
+        ra *= 360.
+        dec *= 0.5 * (np.cos(155. * np.pi/180.) - np.cos(65. * np.pi/180.)) 
+        dec += 0.5 * (np.cos((90. - 25.) * np.pi/180.) + 1.)
+        w = self.trim_to_footprint(ra, dec)
 
-        rands[id]            = {}
+        # trim random galaxies outside footprint and only keep N_r of them 
+        keep = (w > 0.) 
+        assert np.sum(keep) > Nr 
         
-        rands[id]['RAS']     =  2. * np.pi * radraws
-        rands[id]['RAS']     =  np.degrees(rands[id]['RAS'])
+        ra = (ra[keep])[:Nr]
+        dec = (dec[keep])[:Nr]
+        w = (w[keep])[:Nr]
 
-        rands[id]['COSTS']   =  tiles[id]['COST'] ## + tiles[id]['SINT'] * tiles['METAx']['RRADIUS'] * cosdraws
+        if zs is None and dndz is None: 
+            # save to astropy table 
+            tb = Table([ra, dec, w], names=('ra', 'dec', 'weight'))  
 
-        rands[id]['THETAS']  =  np.arccos(rands[id]['COSTS'])
+            # no redshifts needed output now 
+            if file is not None: # save to file 
+                self._write2file(file, tb)
+            return tb
+    
+        # generate redshifts for galaxies 
+        if zs is not None: 
+            # sample redshift from the provided redshifts
+            # this automatically reproduces the dn/dz of the catalog 
+            z = rr.choice(zs, size=Nr) 
+        else: 
+            raise NotImplementedError
 
-        rands[id]['DECS']    =  np.pi/2. - np.arccos(rands[id]['THETAS'])
-        rands[id]['DECS']    =  np.degrees(rands[id]['DECS'])
+        if file is not None: 
+            self._write2file(file, np.vstack([ra, dec, z, w]).T, 
+                    cols=['ra', 'dec', 'z', 'weight'])
+        return np.vstack([ra, dec, z, w]).T          
 
-        pl.plot(rands[id]['RAS'], rands[id]['DECS'], 'k.')
-'''   
-edges              = np.logspace(0.0, 3.0, num=100)
+    def trim_to_footprint(self, ra, dec):
+        ''' Given RA and Dec values, return a np.ndarray of which pixels are in the 
+        DESI footprint. In principle `desimodel.footprint` should return appropriate 
+        systematic weight given ra and dec. I dont' think this is the case at the 
+        moment. 
+        '''
+        assert len(ra) == len(dec) 
 
-tiles['Position']  = transform.SkyToCartesian(tiles[10]['RA'], tilse[10]['DEC'], np.ones_like(tiles[10]['RA']), cosmo=cosmo)
+        pixweight = load_pixweight(256)
+        healpix   = footprint.radec2pix(256, ra, dec) # ra dec of the targets
+        weights   = pixweight[healpix] # weights=1 in footprint
+        return weights
 
-## http://nbodykit.readthedocs.io/en/latest/api/_autosummary/nbodykit.algorithms.paircount_tpcf.tpcf.html
-## nbodykit.algorithms.paircount_tpcf.tpcf.SurveyData2PCF: 
-##
-## Default:  'RA', 'DEC', 'Redshift'   
-## print SurveyData2PCF('2d', data, randoms, edges, cosmo=cosmo, Nmu=20)
-     
-pl.xlim(360.0,  0.0)
-pl.ylim(-20.0, 90.0)
+    def _write2file(self, name, tbl): 
+        ''' write data to specified file 
+        '''
+        # check file type 
+        ftype = name.split('.')[-1].lower()
+        if ftype not in ['fits', 'hdf5']: 
+            msg = ''.join([ftype, ' not supported at the moment', '\n', 'Only fits and hdf5 files supported at the moment']) 
+            raise NotImplementedError(msg) 
 
-pl.savefig('footprint.pdf')
+        if ftype == 'fits': # fits file 
+            # header specifies the columns; this can easily 
+            # be expanded to fit more things 
+            tbl.meta['COMMENTS'] = 'random catalog generated from randoms.py' # some comment here 
+            tbl.write(name, format='fits') 
 
+        elif ftype == 'hdf5':
+            f = h5py.File(name, 'w')
+            # set metadata 
+            f.attrs['COMMENTS'] = 'random catalog generated from randoms.py' # some comment here 
+            # save each column 
+            for i, col in enumerate(tbl.colnames): 
+                f.create_dataset(col, data=tbl.columns[i])
+            f.close() 
+        return None 
