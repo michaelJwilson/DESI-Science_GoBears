@@ -73,8 +73,8 @@ class Randoms(object):
         ra, dec = rr.uniform(size=(2, 4*Nr)) 
     
         ra *= 360.
-        dec *= 90.
-        dec += -25
+        dec *= 0.5 * (np.cos(155. * np.pi/180.) - np.cos(65. * np.pi/180.)) 
+        dec += 0.5 * (np.cos((90. - 25.) * np.pi/180.) + 1.)
         w = self.trim_to_footprint(ra, dec)
 
         # trim random galaxies outside footprint and only keep N_r of them 
